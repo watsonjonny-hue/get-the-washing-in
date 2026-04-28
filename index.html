@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#0F0C20">
+    <title>Get The Washing In</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ── Header ─────────────────────────────────────────────────────────────── -->
+<header>
+    <span class="header-loc" id="loc-name">Loading…</span>
+    <div style="display:flex;align-items:center;gap:10px;">
+        <span class="header-updated" id="updated-label">—</span>
+        <button class="refresh-btn" id="refresh-btn" onclick="refresh()" aria-label="Refresh">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="1 4 1 10 7 10"/>
+                <path d="M3.51 15a9 9 0 1 0 .49-3"/>
+            </svg>
+            Refresh
+        </button>
+    </div>
+</header>
+
+<!-- ── Pill card ──────────────────────────────────────────────────────────── -->
+<div class="pill-card" id="pill-card">
+    <div class="pill-label">Chance of Rain</div>
+    <div class="pill-top">
+        <div class="pill-prob" id="prob-label">—</div>
+        <div class="pill-right">
+            <div class="pill-temp" id="temp-label"></div>
+            <div class="pill-wind" id="wind-label"></div>
+        </div>
+    </div>
+    <div class="pill-sublabel" id="next-rain-label">—</div>
+    <div class="dots-row" id="dots-row"></div>
+</div>
+
+<!-- ── Tab bar ────────────────────────────────────────────────────────────── -->
+<div class="tab-bar">
+    <button class="tab-btn active" id="tab-today"  onclick="showTab('today')">Today</button>
+    <button class="tab-btn"        id="tab-5day"   onclick="showTab('5day')">5 Day</button>
+    <button class="tab-btn"        id="tab-radar"  onclick="showTab('radar')">Radar</button>
+</div>
+
+<!-- ── Today panel ────────────────────────────────────────────────────────── -->
+<div class="panel active" id="panel-today">
+    <!-- Probability curve -->
+    <div class="card" style="margin-top:8px;">
+        <div class="card-title">12-Hour Forecast</div>
+        <canvas id="forecast-canvas"></canvas>
+    </div>
+
+    <!-- 2-hour blocks -->
+    <div class="card" style="margin-top:8px;">
+        <div class="card-title">Hourly Breakdown</div>
+        <div class="blocks-list" id="blocks-list">
+            <div class="status-msg"><span class="emoji">🌦</span>Loading forecast…</div>
+        </div>
+    </div>
+</div>
+
+<!-- ── 5-Day panel ────────────────────────────────────────────────────────── -->
+<div class="panel" id="panel-5day">
+    <div class="card" style="margin-top:8px;">
+        <div class="card-title">5-Day Outlook</div>
+        <div class="daily-strip" id="daily-strip">
+            <div class="status-msg"><span class="emoji">📅</span>Loading…</div>
+        </div>
+    </div>
+</div>
+
+<!-- ── Radar panel ────────────────────────────────────────────────────────── -->
+<div class="panel" id="panel-radar">
+    <div class="card" style="margin-top:8px;">
+        <div class="card-title">Radar</div>
+        <div class="radar-wrap">
+            <canvas id="radar-canvas"></canvas>
+        </div>
+        <div class="radar-label-bar">
+            <span id="radar-label" class="radar-status">Loading radar…</span>
+            <span id="radar-frame-info" style="font-size:10px;"></span>
+        </div>
+    </div>
+</div>
+
+<!-- ── Scripts ────────────────────────────────────────────────────────────── -->
+<script src="config.js"></script>
+<script src="weather.js"></script>
+<script src="forecast.js"></script>
+<script src="radar.js"></script>
+<script>
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let _model        = null;
+let _radarFrameIdx = 0;
+let _radarTimer   = null;
+let _activeTab    = "today";
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
+window.addEventListener("DOMContentLoaded", () => {
+    document.getElementById("loc-name").textContent = CONFIG.locationName;
+    loadAll();
+    setInterval(loadAll, 12 * 60 * 1000);   // refresh every 12 min (matches desktop)
+});
+
+async function refresh() {
+    const btn = document.getElementById("refresh-btn");
+    btn.classList.add("spinning");
+    try { await loadAll(); } finally { btn.classList.remove("spinning"); }
+}
+
+// ── Data loading ──────────────────────────────────────────────────────────────
+async function loadAll() {
+    // Fire all three concurrently — they're independent
+    const [hourlyResult, dailyResult, radarResult] = await Promise.allSettled([
+        getHourlyForecast(),
+        getDailyForecast(),
+        getRadar(),
+    ]);
+
+    const hourly = hourlyResult.status === "fulfilled" ? hourlyResult.value : null;
+    const daily  = dailyResult.status  === "fulfilled" ? dailyResult.value  : null;
+    const radar  = radarResult.status  === "fulfilled" ? radarResult.value  : null;
+
+    _model = buildForecast(hourly, daily, radar);
+    render();
+}
+
+// ── Render ────────────────────────────────────────────────────────────────────
+function render() {
+    if (!_model) return;
+    renderPill();
+    renderDots();
+    renderBlocks();
+    renderCurve();
+    renderDaily();
+    renderRadar();
+}
+
+function renderPill() {
+    const m = _model;
+    document.getElementById("prob-label").textContent    = m.probabilityLabel;
+    document.getElementById("temp-label").textContent    = m.temperatureLabel;
+    document.getElementById("wind-label").textContent    = m.windLabel;
+    document.getElementById("next-rain-label").textContent = m.nextRainLabel;
+
+    const lbl = document.getElementById("updated-label");
+    lbl.textContent  = `Updated ${m.updatedAtLabel}`;
+    lbl.style.color  = m.updatedAtColour;
+
+    // Alert styling on the sub-label
+    const sub = document.getElementById("next-rain-label");
+    sub.classList.toggle("alert", m.nextRainLabel === "Get the washing in!");
+
+    // Pill card border colour reflects weather state
+    const card  = document.getElementById("pill-card");
+    const color = { Clear: "#2A2460", Cloudy: "#2A2A3A", Rain: "#1A3A5C", Warning: "#5C2E00" }[m.weatherState] ?? "#2A2460";
+    card.style.borderColor = color;
+}
+
+function renderDots() {
+    const row = document.getElementById("dots-row");
+    row.innerHTML = "";
+
+    for (const dot of _model.weatherDots) {
+        const wrapper = document.createElement("div");
+        wrapper.className = "dot-wrapper";
+        wrapper.title = `${dot.label} — ${dot.state}`;
+
+        const shape = document.createElement("div");
+        shape.className = "dot-shape";
+
+        if (dot.showDrop) {
+            const drop = document.createElement("span");
+            drop.className = "dot-drop";
+            drop.style.background = dot.color;
+            drop.style.opacity    = dot.dropOpacity;
+            shape.appendChild(drop);
+        } else {
+            const circle = document.createElement("span");
+            circle.className = "dot-circle";
+            circle.style.background = dot.color;
+            shape.appendChild(circle);
+        }
+
+        const time = document.createElement("span");
+        time.className   = "dot-time";
+        time.textContent = dot.label.split("–")[0];
+
+        wrapper.appendChild(shape);
+        wrapper.appendChild(time);
+        row.appendChild(wrapper);
+    }
+}
+
+function renderBlocks() {
+    const list = document.getElementById("blocks-list");
+    if (!_model.blocks.length) {
+        list.innerHTML = `<div class="status-msg">No forecast data</div>`;
+        return;
+    }
+
+    list.innerHTML = "";
+    for (const b of _model.blocks) {
+        const row = document.createElement("div");
+        row.className = "block-row";
+
+        const barColor = b.probability >= 75 ? "#F87171" :
+                         b.probability >= 50 ? "#FB923C" :
+                         b.probability >= 25 ? "#4A7FC4" : "#4B5568";
+
+        row.innerHTML = `
+            <span class="block-time">${b.timeRange}</span>
+            <span class="block-icon">${b.icon}</span>
+            <div class="block-bar-wrap">
+                <div class="block-bar" style="width:${b.probability}%;background:${barColor}"></div>
+            </div>
+            <span class="block-prob">${b.probability}%</span>
+        `;
+        list.appendChild(row);
+    }
+}
+
+function renderCurve() {
+    const canvas = document.getElementById("forecast-canvas");
+    const dpr    = window.devicePixelRatio || 1;
+    const rect   = canvas.getBoundingClientRect();
+    if (!rect.width) return;
+
+    canvas.width  = rect.width  * dpr;
+    canvas.height = rect.height * dpr;
+    const ctx = canvas.getContext("2d");
+    ctx.scale(dpr, dpr);
+
+    const blocks = _model.blocks;
+    if (!blocks.length) return;
+
+    const W = rect.width, H = rect.height;
+    const padL = 28, padR = 8, padT = 10, padB = 22;
+    const plotW = W - padL - padR, plotH = H - padT - padB;
+    const n = blocks.length;
+
+    const probToY = p => padT + plotH - (p / 100) * plotH;
+    const idxToX  = i => padL + (n < 2 ? plotW / 2 : i * plotW / (n - 1));
+
+    // Grid lines
+    ctx.strokeStyle = "rgba(255,255,255,0.06)";
+    ctx.lineWidth   = 0.5;
+    ctx.font        = "7px system-ui";
+    ctx.fillStyle   = "rgba(255,255,255,0.22)";
+    for (const pct of [25, 50, 75]) {
+        const y = probToY(pct);
+        ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(W - padR, y); ctx.stroke();
+        ctx.fillText(`${pct}%`, 0, y + 3);
+    }
+
+    const pts = blocks.map((b, i) => ({ x: idxToX(i), y: probToY(b.probability) }));
+
+    // Catmull-Rom control points
+    const cp1 = i => {
+        const p0 = pts[Math.max(0, i - 1)], p1 = pts[i], p2 = pts[i + 1];
+        return { x: p1.x + (p2.x - p0.x) / 6, y: p1.y + (p2.y - p0.y) / 6 };
+    };
+    const cp2 = i => {
+        const p1 = pts[i], p2 = pts[i + 1], p3 = pts[Math.min(n - 1, i + 2)];
+        return { x: p2.x - (p3.x - p1.x) / 6, y: p2.y - (p3.y - p1.y) / 6 };
+    };
+
+    // Fill
+    const grad = ctx.createLinearGradient(0, padT, 0, padT + plotH);
+    grad.addColorStop(0, "rgba(167,139,250,0.30)");
+    grad.addColorStop(1, "rgba(167,139,250,0.03)");
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, padT + plotH);
+    ctx.lineTo(pts[0].x, pts[0].y);
+    for (let i = 0; i < n - 1; i++) {
+        const c1 = cp1(i), c2 = cp2(i);
+        ctx.bezierCurveTo(c1.x, c1.y, c2.x, c2.y, pts[i + 1].x, pts[i + 1].y);
+    }
+    ctx.lineTo(pts[n - 1].x, padT + plotH);
+    ctx.closePath();
+    ctx.fillStyle = grad;
+    ctx.fill();
+
+    // Line
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 0; i < n - 1; i++) {
+        const c1 = cp1(i), c2 = cp2(i);
+        ctx.bezierCurveTo(c1.x, c1.y, c2.x, c2.y, pts[i + 1].x, pts[i + 1].y);
+    }
+    ctx.strokeStyle = "rgba(167,139,250,0.85)";
+    ctx.lineWidth   = 1.5;
+    ctx.stroke();
+
+    // Dots + labels
+    for (let i = 0; i < n; i++) {
+        const p  = pts[i];
+        const b  = blocks[i];
+        const pc = b.probability;
+
+        const dotColor = pc >= 75 ? "rgba(248,113,113,0.9)" :
+                         pc >= 50 ? "rgba(249,115,22,0.9)"  :
+                         pc >= 20 ? "rgba(252,211,77,0.9)"  :
+                                    "rgba(110,231,183,0.7)";
+
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 2.5, 0, Math.PI * 2);
+        ctx.fillStyle = "rgba(167,139,250,0.9)";
+        ctx.fill();
+
+        ctx.font      = "7.5px system-ui";
+        ctx.fillStyle = dotColor;
+        ctx.textAlign = "center";
+        ctx.fillText(`${pc}%`, p.x, p.y - 6);
+
+        ctx.fillStyle = "rgba(184,179,208,0.45)";
+        ctx.font      = "7px system-ui";
+        ctx.fillText(b.timeRange.split("–")[0], p.x, H - padB + 10);
+    }
+}
+
+function renderDaily() {
+    const strip = document.getElementById("daily-strip");
+    const days  = _model.dailyForecasts;
+    if (!days.length) {
+        strip.innerHTML = `<div class="status-msg">No 5-day data</div>`;
+        return;
+    }
+
+    strip.innerHTML = "";
+    for (const d of days) {
+        const item = document.createElement("div");
+        item.className = "daily-item";
+        item.innerHTML = `
+            <span class="daily-day">${d.dayName}</span>
+            <span class="daily-icon" style="color:${d.conditionColour}">${d.conditionIcon}</span>
+            <span class="daily-temps">${d.tempRange}</span>
+            <span class="daily-rain" style="color:${d.rainColour}">${d.rainLabel}</span>
+        `;
+        strip.appendChild(item);
+    }
+}
+
+function renderRadar() {
+    const frames = _model.radarFrames;
+    document.getElementById("radar-label").textContent = _model.radarLabel;
+
+    if (!frames.length) {
+        document.getElementById("radar-frame-info").textContent = "";
+        return;
+    }
+
+    // Stop existing animation
+    if (_radarTimer) { clearInterval(_radarTimer); _radarTimer = null; }
+    _radarFrameIdx = frames.length - 1;   // start on latest frame
+
+    const canvas = document.getElementById("radar-canvas");
+    const ctx    = canvas.getContext("2d");
+
+    function drawFrame(idx) {
+        const img = new Image();
+        img.onload = () => {
+            canvas.width  = img.naturalWidth;
+            canvas.height = img.naturalHeight;
+            ctx.drawImage(img, 0, 0);
+        };
+        img.src = frames[idx];
+        document.getElementById("radar-frame-info").textContent =
+            `${idx + 1} / ${frames.length}`;
+    }
+
+    drawFrame(_radarFrameIdx);
+
+    // Only animate when radar tab is active
+    if (_activeTab === "radar") {
+        _radarTimer = setInterval(() => {
+            _radarFrameIdx = (_radarFrameIdx + 1) % frames.length;
+            drawFrame(_radarFrameIdx);
+        }, 600);
+    }
+}
+
+// ── Tab switching ─────────────────────────────────────────────────────────────
+function showTab(tab) {
+    _activeTab = tab;
+
+    // Buttons
+    document.getElementById("tab-today").classList.toggle("active", tab === "today");
+    document.getElementById("tab-5day").classList.toggle("active",  tab === "5day");
+    document.getElementById("tab-radar").classList.toggle("active", tab === "radar");
+
+    // Panels
+    document.getElementById("panel-today").classList.toggle("active", tab === "today");
+    document.getElementById("panel-5day").classList.toggle("active",  tab === "5day");
+    document.getElementById("panel-radar").classList.toggle("active", tab === "radar");
+
+    // Start/stop radar animation based on visibility
+    if (_radarTimer) { clearInterval(_radarTimer); _radarTimer = null; }
+    if (tab === "radar" && _model?.radarFrames?.length) {
+        renderRadar();
+    } else if (tab === "today") {
+        // Re-draw curve now that canvas has layout dimensions
+        renderCurve();
+    }
+}
+
+</script>
+</body>
+</html>
