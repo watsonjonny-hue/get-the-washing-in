@@ -145,9 +145,11 @@ function buildForecast(hourlyResult, dailyResult, radarResult) {
             model.currentIntensity = "Rain moving in";
 
         if (radarResult.etaMinutes != null) {
-            if (radarResult.etaMinutes > 0)
+            // Require weather API to also show meaningful probability before
+            // overriding the hourly label — radar alone is too noisy.
+            if (radarResult.etaMinutes > 0 && model.currentProbability >= 20)
                 model.nextRainLabel = `Rain in ~${radarResult.etaMinutes} min (radar)`;
-            else if (model.currentProbability >= 30)
+            else if (radarResult.etaMinutes === 0 && model.currentProbability >= 30)
                 model.nextRainLabel = "Rain here now";
         }
     }
