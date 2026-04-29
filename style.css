@@ -57,6 +57,102 @@ header {
     transition: color 0.3s;
 }
 
+/* ── Location bar ─────────────────────────────────────────────────────────── */
+.loc-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0 16px 4px;
+}
+
+.loc-btn {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text-lo);
+    font-size: 11px;
+    font-weight: 600;
+    padding: 7px 10px;
+    border-radius: 8px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: color 0.15s, border-color 0.15s;
+    flex-shrink: 0;
+}
+.loc-btn:hover        { color: var(--accent); border-color: var(--accent); }
+.loc-btn.locating     { color: var(--accent); border-color: var(--accent); }
+.loc-btn.locating svg { animation: spin 1s linear infinite; }
+
+.loc-search-wrap {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0 8px;
+    transition: border-color 0.15s;
+}
+.loc-search-wrap:focus-within { border-color: var(--accent); }
+
+.loc-search-icon {
+    color: var(--text-lo);
+    flex-shrink: 0;
+    margin-right: 6px;
+}
+
+.loc-input {
+    flex: 1;
+    background: none;
+    border: none;
+    outline: none;
+    color: var(--text-hi);
+    font-size: 12px;
+    padding: 7px 0;
+    min-width: 0;
+}
+.loc-input::placeholder { color: var(--text-lo); }
+
+.loc-go-btn {
+    background: none;
+    border: none;
+    color: var(--text-lo);
+    font-size: 16px;
+    cursor: pointer;
+    padding: 0 2px;
+    line-height: 1;
+    transition: color 0.15s;
+}
+.loc-go-btn:hover { color: var(--accent); }
+
+/* Search results dropdown */
+.loc-results {
+    margin: 0 16px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    z-index: 100;
+}
+
+.loc-result-item {
+    display: block;
+    width: 100%;
+    background: none;
+    border: none;
+    border-bottom: 1px solid var(--border);
+    color: var(--text-mid);
+    font-size: 12px;
+    text-align: left;
+    padding: 10px 14px;
+    cursor: pointer;
+    transition: background 0.1s, color 0.1s;
+}
+.loc-result-item:last-child  { border-bottom: none; }
+.loc-result-item:hover       { background: var(--surface2); color: var(--text-hi); }
+
 /* ── Pill card ───────────────────────────────────────────────────────────── */
 .pill-card {
     margin: 8px 16px;

@@ -15,7 +15,7 @@
 <!-- ── Header ─────────────────────────────────────────────────────────────── -->
 <header>
     <span class="header-loc" id="loc-name">Loading…</span>
-    <div style="display:flex;align-items:center;gap:10px;">
+    <div style="display:flex;align-items:center;gap:8px;">
         <span class="header-updated" id="updated-label">—</span>
         <button class="refresh-btn" id="refresh-btn" onclick="refresh()" aria-label="Refresh">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -27,6 +27,36 @@
         </button>
     </div>
 </header>
+
+<!-- ── Location bar ────────────────────────────────────────────────────────── -->
+<div class="loc-bar">
+    <!-- GPS button -->
+    <button class="loc-btn" id="gps-btn" onclick="useGPS()" title="Use my current location">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>
+            <circle cx="12" cy="12" r="8" stroke-dasharray="2 3"/>
+        </svg>
+        My location
+    </button>
+
+    <!-- Search -->
+    <div class="loc-search-wrap">
+        <svg class="loc-search-icon" width="12" height="12" viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+        </svg>
+        <input  class="loc-input" id="loc-input" type="text"
+                placeholder="Search place or postcode…"
+                autocomplete="off" autocorrect="off" spellcheck="false"
+                onkeydown="if(event.key==='Enter') searchLocation()"/>
+        <button class="loc-go-btn" onclick="searchLocation()" aria-label="Search">→</button>
+    </div>
+</div>
+
+<!-- Search results dropdown -->
+<div class="loc-results" id="loc-results" style="display:none;"></div>
 
 <!-- ── Pill card ──────────────────────────────────────────────────────────── -->
 <div class="pill-card" id="pill-card">
@@ -51,13 +81,10 @@
 
 <!-- ── Today panel ────────────────────────────────────────────────────────── -->
 <div class="panel active" id="panel-today">
-    <!-- Probability curve -->
     <div class="card" style="margin-top:8px;">
         <div class="card-title">12-Hour Forecast</div>
         <canvas id="forecast-canvas"></canvas>
     </div>
-
-    <!-- 2-hour blocks -->
     <div class="card" style="margin-top:8px;">
         <div class="card-title">Hourly Breakdown</div>
         <div class="blocks-list" id="blocks-list">
@@ -98,16 +125,25 @@
 <script>
 
 // ── State ─────────────────────────────────────────────────────────────────────
-let _model        = null;
+let _model         = null;
 let _radarFrameIdx = 0;
-let _radarTimer   = null;
-let _activeTab    = "today";
+let _radarTimer    = null;
+let _activeTab     = "today";
+let _currentLat    = CONFIG.latitude;
+let _currentLon    = CONFIG.longitude;
+let _currentName   = CONFIG.locationName;
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
 window.addEventListener("DOMContentLoaded", () => {
-    document.getElementById("loc-name").textContent = CONFIG.locationName;
+    document.getElementById("loc-name").textContent = _currentName;
     loadAll();
-    setInterval(loadAll, 12 * 60 * 1000);   // refresh every 12 min (matches desktop)
+    setInterval(loadAll, 12 * 60 * 1000);
+
+    // Close search results when clicking outside
+    document.addEventListener("click", e => {
+        if (!e.target.closest(".loc-bar") && !e.target.closest(".loc-results"))
+            hideResults();
+    });
 });
 
 async function refresh() {
@@ -116,9 +152,141 @@ async function refresh() {
     try { await loadAll(); } finally { btn.classList.remove("spinning"); }
 }
 
+// ── GPS location ──────────────────────────────────────────────────────────────
+function useGPS() {
+    const btn = document.getElementById("gps-btn");
+    btn.classList.add("locating");
+    btn.textContent = "Locating…";
+
+    if (!navigator.geolocation) {
+        showLocError("GPS not available on this device");
+        btn.classList.remove("locating");
+        btn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="8" stroke-dasharray="2 3"/></svg> My location`;
+        return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+        async pos => {
+            _currentLat  = pos.coords.latitude;
+            _currentLon  = pos.coords.longitude;
+            _currentName = "Current location";
+            invalidateCaches();
+
+            // Reverse geocode to get a friendly name
+            try {
+                const name = await reverseGeocode(_currentLat, _currentLon);
+                if (name) _currentName = name;
+            } catch {}
+
+            document.getElementById("loc-name").textContent = _currentName;
+            btn.classList.remove("locating");
+            btn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="8" stroke-dasharray="2 3"/></svg> My location`;
+            await loadAll();
+        },
+        err => {
+            showLocError("Couldn't get location — check browser permissions");
+            btn.classList.remove("locating");
+            btn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="8" stroke-dasharray="2 3"/></svg> My location`;
+        },
+        { timeout: 10000, maximumAge: 60000 }
+    );
+}
+
+// ── Place search ──────────────────────────────────────────────────────────────
+let _searchTimer = null;
+
+document.addEventListener("DOMContentLoaded", () => {
+    const input = document.getElementById("loc-input");
+    input.addEventListener("input", () => {
+        clearTimeout(_searchTimer);
+        const q = input.value.trim();
+        if (q.length < 2) { hideResults(); return; }
+        _searchTimer = setTimeout(() => fetchSuggestions(q), 350);
+    });
+});
+
+async function fetchSuggestions(q) {
+    try {
+        // Open-Meteo geocoding — same provider as weather, no key needed
+        const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(q)}&count=5&language=en&format=json`;
+        const resp = await fetch(url);
+        const json = await resp.json();
+        showResults(json.results || []);
+    } catch { hideResults(); }
+}
+
+function showResults(results) {
+    const box = document.getElementById("loc-results");
+    if (!results.length) { hideResults(); return; }
+
+    box.innerHTML = "";
+    for (const r of results) {
+        const parts = [r.name, r.admin1, r.country].filter(Boolean);
+        const label = parts.join(", ");
+        const item  = document.createElement("button");
+        item.className   = "loc-result-item";
+        item.textContent = label;
+        item.onclick     = () => selectLocation(r.latitude, r.longitude, label);
+        box.appendChild(item);
+    }
+    box.style.display = "block";
+}
+
+function hideResults() {
+    const box = document.getElementById("loc-results");
+    box.style.display = "none";
+    box.innerHTML = "";
+}
+
+async function searchLocation() {
+    const q = document.getElementById("loc-input").value.trim();
+    if (!q) return;
+    await fetchSuggestions(q);
+}
+
+async function selectLocation(lat, lon, name) {
+    _currentLat  = lat;
+    _currentLon  = lon;
+    _currentName = name;
+    invalidateCaches();
+    document.getElementById("loc-name").textContent = name;
+    document.getElementById("loc-input").value = "";
+    hideResults();
+    await loadAll();
+}
+
+// ── Reverse geocode (GPS → place name) ───────────────────────────────────────
+async function reverseGeocode(lat, lon) {
+    // Open-Meteo doesn't do reverse geocoding, so we use the free Nominatim API
+    const url = `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`;
+    const resp = await fetch(url, { headers: { "Accept-Language": "en" } });
+    const json = await resp.json();
+    const a    = json.address || {};
+    // Build a short readable name: village/town/city + county/state
+    const place = a.village || a.town || a.city_district || a.city || a.county || "";
+    const region = a.county || a.state_district || a.state || "";
+    return [place, region].filter(Boolean).join(", ") || json.display_name?.split(",")[0] || null;
+}
+
+// ── Cache invalidation (force fresh fetch on location change) ─────────────────
+function invalidateCaches() {
+    // weather.js caches are module-level — reset by overwriting CONFIG coords
+    // so the cache-key check (cacheCoords) forces a fresh fetch
+    CONFIG.latitude     = _currentLat;
+    CONFIG.longitude    = _currentLon;
+    CONFIG.locationName = _currentName;
+}
+
+function showLocError(msg) {
+    const lbl = document.getElementById("updated-label");
+    const prev = lbl.textContent;
+    lbl.textContent = msg;
+    lbl.style.color = "#F87171";
+    setTimeout(() => { lbl.textContent = prev; lbl.style.color = ""; }, 3000);
+}
+
 // ── Data loading ──────────────────────────────────────────────────────────────
 async function loadAll() {
-    // Fire all three concurrently — they're independent
     const [hourlyResult, dailyResult, radarResult] = await Promise.allSettled([
         getHourlyForecast(),
         getDailyForecast(),
@@ -146,20 +314,18 @@ function render() {
 
 function renderPill() {
     const m = _model;
-    document.getElementById("prob-label").textContent    = m.probabilityLabel;
-    document.getElementById("temp-label").textContent    = m.temperatureLabel;
-    document.getElementById("wind-label").textContent    = m.windLabel;
+    document.getElementById("prob-label").textContent      = m.probabilityLabel;
+    document.getElementById("temp-label").textContent      = m.temperatureLabel;
+    document.getElementById("wind-label").textContent      = m.windLabel;
     document.getElementById("next-rain-label").textContent = m.nextRainLabel;
 
     const lbl = document.getElementById("updated-label");
-    lbl.textContent  = `Updated ${m.updatedAtLabel}`;
-    lbl.style.color  = m.updatedAtColour;
+    lbl.textContent = `Updated ${m.updatedAtLabel}`;
+    lbl.style.color = m.updatedAtColour;
 
-    // Alert styling on the sub-label
     const sub = document.getElementById("next-rain-label");
     sub.classList.toggle("alert", m.nextRainLabel === "Get the washing in!");
 
-    // Pill card border colour reflects weather state
     const card  = document.getElementById("pill-card");
     const color = { Clear: "#2A2460", Cloudy: "#2A2A3A", Rain: "#1A3A5C", Warning: "#5C2E00" }[m.weatherState] ?? "#2A2460";
     card.style.borderColor = color;
@@ -179,13 +345,13 @@ function renderDots() {
 
         if (dot.showDrop) {
             const drop = document.createElement("span");
-            drop.className = "dot-drop";
+            drop.className    = "dot-drop";
             drop.style.background = dot.color;
             drop.style.opacity    = dot.dropOpacity;
             shape.appendChild(drop);
         } else {
             const circle = document.createElement("span");
-            circle.className = "dot-circle";
+            circle.className      = "dot-circle";
             circle.style.background = dot.color;
             shape.appendChild(circle);
         }
@@ -250,7 +416,6 @@ function renderCurve() {
     const probToY = p => padT + plotH - (p / 100) * plotH;
     const idxToX  = i => padL + (n < 2 ? plotW / 2 : i * plotW / (n - 1));
 
-    // Grid lines
     ctx.strokeStyle = "rgba(255,255,255,0.06)";
     ctx.lineWidth   = 0.5;
     ctx.font        = "7px system-ui";
@@ -263,7 +428,6 @@ function renderCurve() {
 
     const pts = blocks.map((b, i) => ({ x: idxToX(i), y: probToY(b.probability) }));
 
-    // Catmull-Rom control points
     const cp1 = i => {
         const p0 = pts[Math.max(0, i - 1)], p1 = pts[i], p2 = pts[i + 1];
         return { x: p1.x + (p2.x - p0.x) / 6, y: p1.y + (p2.y - p0.y) / 6 };
@@ -273,7 +437,6 @@ function renderCurve() {
         return { x: p2.x - (p3.x - p1.x) / 6, y: p2.y - (p3.y - p1.y) / 6 };
     };
 
-    // Fill
     const grad = ctx.createLinearGradient(0, padT, 0, padT + plotH);
     grad.addColorStop(0, "rgba(167,139,250,0.30)");
     grad.addColorStop(1, "rgba(167,139,250,0.03)");
@@ -289,7 +452,6 @@ function renderCurve() {
     ctx.fillStyle = grad;
     ctx.fill();
 
-    // Line
     ctx.beginPath();
     ctx.moveTo(pts[0].x, pts[0].y);
     for (let i = 0; i < n - 1; i++) {
@@ -300,7 +462,6 @@ function renderCurve() {
     ctx.lineWidth   = 1.5;
     ctx.stroke();
 
-    // Dots + labels
     for (let i = 0; i < n; i++) {
         const p  = pts[i];
         const b  = blocks[i];
@@ -358,9 +519,8 @@ function renderRadar() {
         return;
     }
 
-    // Stop existing animation
     if (_radarTimer) { clearInterval(_radarTimer); _radarTimer = null; }
-    _radarFrameIdx = frames.length - 1;   // start on latest frame
+    _radarFrameIdx = frames.length - 1;
 
     const canvas = document.getElementById("radar-canvas");
     const ctx    = canvas.getContext("2d");
@@ -373,13 +533,11 @@ function renderRadar() {
             ctx.drawImage(img, 0, 0);
         };
         img.src = frames[idx];
-        document.getElementById("radar-frame-info").textContent =
-            `${idx + 1} / ${frames.length}`;
+        document.getElementById("radar-frame-info").textContent = `${idx + 1} / ${frames.length}`;
     }
 
     drawFrame(_radarFrameIdx);
 
-    // Only animate when radar tab is active
     if (_activeTab === "radar") {
         _radarTimer = setInterval(() => {
             _radarFrameIdx = (_radarFrameIdx + 1) % frames.length;
@@ -391,25 +549,14 @@ function renderRadar() {
 // ── Tab switching ─────────────────────────────────────────────────────────────
 function showTab(tab) {
     _activeTab = tab;
+    ["today", "5day", "radar"].forEach(t => {
+        document.getElementById(`tab-${t}`).classList.toggle("active", t === tab);
+        document.getElementById(`panel-${t}`).classList.toggle("active", t === tab);
+    });
 
-    // Buttons
-    document.getElementById("tab-today").classList.toggle("active", tab === "today");
-    document.getElementById("tab-5day").classList.toggle("active",  tab === "5day");
-    document.getElementById("tab-radar").classList.toggle("active", tab === "radar");
-
-    // Panels
-    document.getElementById("panel-today").classList.toggle("active", tab === "today");
-    document.getElementById("panel-5day").classList.toggle("active",  tab === "5day");
-    document.getElementById("panel-radar").classList.toggle("active", tab === "radar");
-
-    // Start/stop radar animation based on visibility
     if (_radarTimer) { clearInterval(_radarTimer); _radarTimer = null; }
-    if (tab === "radar" && _model?.radarFrames?.length) {
-        renderRadar();
-    } else if (tab === "today") {
-        // Re-draw curve now that canvas has layout dimensions
-        renderCurve();
-    }
+    if (tab === "radar" && _model?.radarFrames?.length) renderRadar();
+    if (tab === "today") renderCurve();
 }
 
 </script>

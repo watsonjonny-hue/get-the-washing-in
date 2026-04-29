@@ -132,9 +132,16 @@ function buildForecast(hourlyResult, dailyResult, radarResult) {
     if (radarResult) {
         model.imminentRainEtaMinutes = radarResult.etaMinutes;
         model.radarFrames            = radarResult.frameDataUrls;
-        model.radarLabel             = radarResult.summary;
 
-        if (radarResult.lastIntensity > 0.25)
+        // Only show "Rain here now" if the weather API also agrees (≥ 30%).
+        // Radar alone is too noisy — this prevents false positives on clear days.
+        if (radarResult.etaMinutes === 0 && model.currentProbability < 30) {
+            model.radarLabel = "Clear on radar";
+        } else {
+            model.radarLabel = radarResult.summary;
+        }
+
+        if (radarResult.lastIntensity > 0.25 && model.currentProbability >= 30)
             model.currentIntensity = "Rain moving in";
 
         if (radarResult.etaMinutes != null) {
