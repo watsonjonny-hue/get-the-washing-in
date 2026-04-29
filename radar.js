@@ -191,43 +191,44 @@ function measureIntensity(img) {
     return count > 0 ? total / count : 0;
 }
 
-// ── ETA calculation (port of ComputeEta) ─────────────────────────────────────
+// ── ETA calculation ───────────────────────────────────────────────────────────
+//
+// Only trust the radar when:
+//   • Latest frame is above noise (rain is here now), OR
+//   • The last 3+ frames show a *consistently rising* trend AND the latest
+//     value is already meaningfully above zero (rain genuinely approaching).
+//
+// Deliberately NOT extrapolating from old frames that spiked then dropped —
+// that pattern means rain passed through, not that it's coming.
 
 function computeEta(intensities, latest) {
     if (!intensities.length) return { etaMinutes: null, summary: "No radar data" };
 
     const NOISE = 0.30;
 
-    if (latest >= NOISE) {
+    // Rain is here now — both latest frame AND previous frame above noise
+    // (two consecutive frames avoids single-frame spikes)
+    const prevLatest = intensities.length >= 2 ? intensities[intensities.length - 2] : 0;
+    if (latest >= NOISE && prevLatest >= NOISE * 0.7) {
         return { etaMinutes: 0, summary: "Rain here now" };
     }
 
-    // Look for approaching rain in recent frames (each frame = 5 min apart)
-    for (let i = intensities.length - 2; i >= 0; i--) {
-        if (intensities[i] >= NOISE) {
-            const framesAway = intensities.length - 1 - i;
-            const mins       = framesAway * 5;
-            if (mins <= 60) {
-                return {
-                    etaMinutes: mins,
-                    summary: `Rain in ~${mins} min`
-                };
-            }
-        }
-    }
-
-    // Simple trend: if intensity is rising toward the threshold
+    // Rain approaching — requires sustained rising trend across last 3 frames
+    // AND latest value already above a meaningful floor (not just noise drift)
     if (intensities.length >= 3) {
-        const last3 = intensities.slice(-3);
+        const last3  = intensities.slice(-3);
         const rising = last3[1] > last3[0] && last3[2] > last3[1];
-        if (rising && latest > 0.05) {
-            const slope = (last3[2] - last3[0]) / (2 * 5);  // per minute
-            const minsToThreshold = (NOISE - latest) / slope;
-            if (minsToThreshold > 0 && minsToThreshold <= 60) {
-                return {
-                    etaMinutes: Math.round(minsToThreshold),
-                    summary: `Rain approaching`
-                };
+        const floor  = 0.08;   // must already be meaningfully present
+        if (rising && latest >= floor) {
+            const slope = (last3[2] - last3[0]) / (2 * 5);  // intensity per minute
+            if (slope > 0) {
+                const minsToThreshold = (NOISE - latest) / slope;
+                if (minsToThreshold > 0 && minsToThreshold <= 45) {
+                    return {
+                        etaMinutes: Math.round(minsToThreshold),
+                        summary: `Rain approaching`
+                    };
+                }
             }
         }
     }
