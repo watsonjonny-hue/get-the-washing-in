@@ -10,10 +10,13 @@ const RADAR_COLOR = 4;      // TWC palette (matches desktop night theme)
 // ── Public API ────────────────────────────────────────────────────────────────
 
 async function getRadar() {
+    if (CONFIG.latitude == null || CONFIG.longitude == null)
+        return { etaMinutes: null, lastIntensity: 0, summary: "Set a location to see radar", frameDataUrls: [] };
+
     const meta = await fetchMetadata();
     if (!meta) return { etaMinutes: null, lastIntensity: 0, summary: "Radar unavailable", frameDataUrls: [] };
 
-    const frames = meta.slice(-6);   // last 6 frames (30 min of history)
+    const frames = meta.slice(-6);
     const { cx, cy } = locationToTile(CONFIG.latitude, CONFIG.longitude, RADAR_ZOOM);
 
     const intensities = [];
@@ -62,7 +65,6 @@ async function buildFrame(frame, cx, cy, frameIndex, totalFrames) {
     canvas.height = gridH;
     const ctx = canvas.getContext("2d");
 
-    // Dark background (matches desktop app)
     ctx.fillStyle = "#11102A";
     ctx.fillRect(0, 0, gridW, gridH);
 
@@ -74,16 +76,14 @@ async function buildFrame(frame, cx, cy, frameIndex, totalFrames) {
         }
     }
 
-    // Layer 2: radar tiles (75% opacity, matching desktop's 0.75 alpha)
+    // Layer 2: radar tiles (75% opacity)
     let centerIntensity = null;
     for (let dy = -RADAR_HALF; dy <= RADAR_HALF; dy++) {
         for (let dx = -RADAR_HALF; dx <= RADAR_HALF; dx++) {
             const img = await fetchRadarTile(cx + dx, cy + dy, frame);
             if (!img) continue;
-
             if (dx === 0 && dy === 0)
                 centerIntensity = measureIntensity(img);
-
             ctx.globalAlpha = 0.75;
             ctx.drawImage(img, (dx + RADAR_HALF) * TILE_SIZE, (dy + RADAR_HALF) * TILE_SIZE, TILE_SIZE, TILE_SIZE);
             ctx.globalAlpha = 1.0;
@@ -101,15 +101,15 @@ async function buildFrame(frame, cx, cy, frameIndex, totalFrames) {
     const locPx = Math.round(RADAR_HALF * TILE_SIZE + fracX * TILE_SIZE);
     const locPy = Math.round(RADAR_HALF * TILE_SIZE + fracY * TILE_SIZE);
 
-    ctx.strokeStyle = "rgba(167,139,250,0.8)";
-    ctx.lineWidth   = 1.5;
+    ctx.strokeStyle = "rgba(167,139,250,0.95)";
+    ctx.lineWidth   = 2.5;
     ctx.beginPath();
-    ctx.moveTo(locPx - 10, locPy); ctx.lineTo(locPx + 10, locPy);
-    ctx.moveTo(locPx, locPy - 10); ctx.lineTo(locPx, locPy + 10);
+    ctx.moveTo(locPx - 14, locPy); ctx.lineTo(locPx + 14, locPy);
+    ctx.moveTo(locPx, locPy - 14); ctx.lineTo(locPx, locPy + 14);
     ctx.stroke();
-    ctx.fillStyle = "rgba(167,139,250,0.9)";
+    ctx.fillStyle = "rgba(167,139,250,1.0)";
     ctx.beginPath();
-    ctx.arc(locPx, locPy, 3, 0, Math.PI * 2);
+    ctx.arc(locPx, locPy, 4, 0, Math.PI * 2);
     ctx.fill();
 
     // Crop centred on location
@@ -123,7 +123,6 @@ async function buildFrame(frame, cx, cy, frameIndex, totalFrames) {
     const cctx = cropped.getContext("2d");
     cctx.drawImage(canvas, cropX, cropY, CROP_W, CROP_H, 0, 0, CROP_W, CROP_H);
 
-    // Frame progress dots (top-right)
     drawFrameDots(cctx, frameIndex, totalFrames, CROP_W);
 
     return { dataUrl: cropped.toDataURL(), intensity: centerIntensity };
@@ -148,12 +147,10 @@ function drawFrameDots(ctx, frameIndex, totalFrames, width) {
 // ── Tile fetchers ─────────────────────────────────────────────────────────────
 
 async function fetchMapTile(x, y) {
-    // OpenFreeMap — no key required, CORS open, dark style
     const url = `https://tiles.openfreemap.org/styles/dark/${RADAR_ZOOM}/${x}/${y}.png`;
-    return loadImage(url).catch(() => {
-        // Fallback: plain OpenStreetMap (light, but always works)
-        return loadImage(`https://tile.openstreetmap.org/${RADAR_ZOOM}/${x}/${y}.png`).catch(() => null);
-    });
+    return loadImage(url).catch(() =>
+        loadImage(`https://tile.openstreetmap.org/${RADAR_ZOOM}/${x}/${y}.png`).catch(() => null)
+    );
 }
 
 async function fetchRadarTile(x, y, frame) {
@@ -171,7 +168,7 @@ function loadImage(url) {
     });
 }
 
-// ── Intensity sampling (port of MeasureIntensity) ─────────────────────────────
+// ── Intensity sampling ────────────────────────────────────────────────────────
 
 function measureIntensity(img) {
     const c   = document.createElement("canvas");
@@ -183,7 +180,7 @@ function measureIntensity(img) {
     const data = ctx.getImageData(0, 0, c.width, c.height).data;
     let total = 0, count = 0;
     for (let i = 3; i < data.length; i += 4) {
-        if (data[i] > 10) {          // skip nearly-transparent pixels
+        if (data[i] > 10) {
             total += data[i] / 255;
             count++;
         }
@@ -192,42 +189,27 @@ function measureIntensity(img) {
 }
 
 // ── ETA calculation ───────────────────────────────────────────────────────────
-//
-// Only trust the radar when:
-//   • Latest frame is above noise (rain is here now), OR
-//   • The last 3+ frames show a *consistently rising* trend AND the latest
-//     value is already meaningfully above zero (rain genuinely approaching).
-//
-// Deliberately NOT extrapolating from old frames that spiked then dropped —
-// that pattern means rain passed through, not that it's coming.
 
 function computeEta(intensities, latest) {
     if (!intensities.length) return { etaMinutes: null, summary: "No radar data" };
 
     const NOISE = 0.30;
 
-    // Rain is here now — both latest frame AND previous frame above noise
-    // (two consecutive frames avoids single-frame spikes)
     const prevLatest = intensities.length >= 2 ? intensities[intensities.length - 2] : 0;
     if (latest >= NOISE && prevLatest >= NOISE * 0.7) {
         return { etaMinutes: 0, summary: "Rain here now" };
     }
 
-    // Rain approaching — requires sustained rising trend across last 3 frames
-    // AND latest value already above a meaningful floor (not just noise drift)
     if (intensities.length >= 3) {
         const last3  = intensities.slice(-3);
         const rising = last3[1] > last3[0] && last3[2] > last3[1];
-        const floor  = 0.08;   // must already be meaningfully present
+        const floor  = 0.08;
         if (rising && latest >= floor) {
-            const slope = (last3[2] - last3[0]) / (2 * 5);  // intensity per minute
+            const slope = (last3[2] - last3[0]) / (2 * 5);
             if (slope > 0) {
                 const minsToThreshold = (NOISE - latest) / slope;
                 if (minsToThreshold > 0 && minsToThreshold <= 45) {
-                    return {
-                        etaMinutes: Math.round(minsToThreshold),
-                        summary: `Rain approaching`
-                    };
+                    return { etaMinutes: Math.round(minsToThreshold), summary: "Rain approaching" };
                 }
             }
         }
@@ -236,7 +218,7 @@ function computeEta(intensities, latest) {
     return { etaMinutes: null, summary: "Clear on radar" };
 }
 
-// ── Tile coordinate maths (port of LocationToTile) ────────────────────────────
+// ── Tile coordinate maths ─────────────────────────────────────────────────────
 
 function locationToTile(lat, lon, zoom) {
     const latRad = lat * Math.PI / 180;
