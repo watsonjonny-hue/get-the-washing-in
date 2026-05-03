@@ -7,11 +7,16 @@ const CACHE_MINUTES = 12;
 
 let _hourlyCache = null;   // { retrievedAt, points }
 let _dailyCache  = null;   // { retrievedAt, points }
-let _cacheCoords = null;
+let _cacheCoords = null;   // { lat, lon } — shared by both caches
+
+// Browser's IANA timezone string, e.g. "Europe/London", "America/New_York"
+const TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
 async function getHourlyForecast() {
+    if (CONFIG.latitude == null || CONFIG.longitude == null) return null;
+
     const now = Date.now();
     if (_hourlyCache && _cacheCoords &&
         _cacheCoords.lat === CONFIG.latitude &&
@@ -22,7 +27,7 @@ async function getHourlyForecast() {
 
     const url = `${BASE_URL}?latitude=${CONFIG.latitude}&longitude=${CONFIG.longitude}` +
         `&hourly=precipitation_probability,precipitation,weather_code,temperature_2m,windspeed_10m,winddirection_10m` +
-        `&wind_speed_unit=mph&timezone=Europe/London&forecast_days=2`;
+        `&wind_speed_unit=mph&timezone=${encodeURIComponent(TIMEZONE)}&forecast_days=2`;
 
     const resp = await fetch(url);
     if (!resp.ok) throw new Error(`Open-Meteo hourly: ${resp.status}`);
@@ -35,21 +40,27 @@ async function getHourlyForecast() {
 }
 
 async function getDailyForecast() {
+    if (CONFIG.latitude == null || CONFIG.longitude == null) return null;
+
     const now = Date.now();
-    if (_dailyCache && now - _dailyCache.retrievedAt < CACHE_MINUTES * 60 * 1000) {
+    if (_dailyCache && _cacheCoords &&
+        _cacheCoords.lat === CONFIG.latitude &&
+        _cacheCoords.lon === CONFIG.longitude &&
+        now - _dailyCache.retrievedAt < CACHE_MINUTES * 60 * 1000) {
         return _dailyCache;
     }
 
     const url = `${BASE_URL}?latitude=${CONFIG.latitude}&longitude=${CONFIG.longitude}` +
         `&daily=weathercode,temperature_2m_max,temperature_2m_min,precipitation_probability_max,sunrise,sunset` +
-        `&timezone=Europe/London&forecast_days=5`;
+        `&timezone=${encodeURIComponent(TIMEZONE)}&forecast_days=5`;
 
     const resp = await fetch(url);
     if (!resp.ok) throw new Error(`Open-Meteo daily: ${resp.status}`);
     const json = await resp.json();
 
     const points = parseDaily(json);
-    _dailyCache = { retrievedAt: Date.now(), points };
+    _dailyCache  = { retrievedAt: Date.now(), points };
+    _cacheCoords = { lat: CONFIG.latitude, lon: CONFIG.longitude };
     return _dailyCache;
 }
 
@@ -68,7 +79,7 @@ function parseHourly(json) {
 
     const points = [];
     for (let i = 0; i < times.length; i++) {
-        const ts    = new Date(times[i]);       // "2026-04-28T09:00" → local Date
+        const ts    = new Date(times[i]);
         const prob  = probs[i]  ?? 0;
         const code  = codes[i]  ?? 0;
         const temp  = temps[i]  ?? null;
@@ -122,7 +133,6 @@ function parseDaily(json) {
             conditionLabel:    label,
             sunrise,
             sunset,
-            // Computed helpers
             get dayName()   { return isToday(this.date) ? "Today" : this.date.toLocaleDateString('en-GB', { weekday: 'short' }); },
             get tempRange() { return `${Math.round(tempMax)}° / ${Math.round(tempMin)}°`; },
             get rainLabel() { return prob >= 5 ? `${prob}%` : "—"; },
@@ -141,7 +151,7 @@ function parseDaily(json) {
     return points;
 }
 
-// ── WMO code mapping (port of MapCode / FromCode) ─────────────────────────────
+// ── WMO code mapping ──────────────────────────────────────────────────────────
 
 function mapCode(code) {
     if (code === 0 || code === 1 || code === 2)                                          return "Clear";
@@ -168,7 +178,7 @@ function fromCode(code) {
 function fromCodeWithProbability(code, prob) {
     const base = fromCode(code);
     if (base.state === "Clear" || base.state === "Cloudy") return base;
-    if (base.state === "Warning") return base;   // always show thunderstorm
+    if (base.state === "Warning") return base;
     if (prob < 25) return { icon: "☁", label: "Mostly dry",  state: "Cloudy" };
     if (prob < 50) {
         const hedged = {
