@@ -139,7 +139,6 @@ window.addEventListener("DOMContentLoaded", () => {
     loadAll();
     setInterval(loadAll, 12 * 60 * 1000);
 
-    // Close search results when clicking outside
     document.addEventListener("click", e => {
         if (!e.target.closest(".loc-bar") && !e.target.closest(".loc-results"))
             hideResults();
@@ -172,7 +171,6 @@ function useGPS() {
             _currentName = "Current location";
             invalidateCaches();
 
-            // Reverse geocode to get a friendly name
             try {
                 const name = await reverseGeocode(_currentLat, _currentLon);
                 if (name) _currentName = name;
@@ -207,7 +205,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
 async function fetchSuggestions(q) {
     try {
-        // Open-Meteo geocoding — same provider as weather, no key needed
         const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(q)}&count=5&language=en&format=json`;
         const resp = await fetch(url);
         const json = await resp.json();
@@ -255,23 +252,19 @@ async function selectLocation(lat, lon, name) {
     await loadAll();
 }
 
-// ── Reverse geocode (GPS → place name) ───────────────────────────────────────
+// ── Reverse geocode ───────────────────────────────────────────────────────────
 async function reverseGeocode(lat, lon) {
-    // Open-Meteo doesn't do reverse geocoding, so we use the free Nominatim API
     const url = `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`;
     const resp = await fetch(url, { headers: { "Accept-Language": "en" } });
     const json = await resp.json();
     const a    = json.address || {};
-    // Build a short readable name: village/town/city + county/state
-    const place = a.village || a.town || a.city_district || a.city || a.county || "";
+    const place  = a.village || a.town || a.city_district || a.city || a.county || "";
     const region = a.county || a.state_district || a.state || "";
     return [place, region].filter(Boolean).join(", ") || json.display_name?.split(",")[0] || null;
 }
 
-// ── Cache invalidation (force fresh fetch on location change) ─────────────────
+// ── Cache invalidation ────────────────────────────────────────────────────────
 function invalidateCaches() {
-    // weather.js caches are module-level — reset by overwriting CONFIG coords
-    // so the cache-key check (cacheCoords) forces a fresh fetch
     CONFIG.latitude     = _currentLat;
     CONFIG.longitude    = _currentLon;
     CONFIG.locationName = _currentName;
@@ -346,11 +339,10 @@ function renderDots() {
         if (dot.showDrop) {
             const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
             svg.setAttribute("width", "8");
-            svg.setAttribute("height", "12");
-            svg.setAttribute("viewBox", "0 0 8 12");
+            svg.setAttribute("height", "13");
+            svg.setAttribute("viewBox", "0 0 8 13");
             svg.style.opacity = dot.dropOpacity;
             const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-            // Proper teardrop: pointed top, round bottom — matches the desktop WPF app
             path.setAttribute("d", "M 4,0 C 7,3 8,6 8,9 A 4,4 0 1 1 0,9 C 0,6 1,3 4,0 Z");
             path.setAttribute("fill", dot.color);
             svg.appendChild(path);
