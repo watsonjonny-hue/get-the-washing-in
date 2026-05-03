@@ -112,12 +112,16 @@ function buildForecast(hourlyResult, dailyResult, radarResult) {
 
                 const fmt = t => `${String(t.getHours()).padStart(2,"0")}:${String(t.getMinutes()).padStart(2,"0")}`;
                 const endTs = new Date(pair[pair.length-1].timestamp.getTime() + 3600000);
+                // Use probability to drive the icon — same logic as the raindrop dots.
+                // WMO weather_code can say "overcast" at 80%+ probability, giving a cloud
+                // icon next to a nearly-full rain bar. Probability is more reliable.
+                const displayState = prob >= 40 ? "Rain" : state;
                 model.blocks.push({
                     timeRange:   `${fmt(pair[0].timestamp)}–${fmt(endTs)}`,
                     probability: prob,
                     intensity:   inten,
-                    icon:        iconForState(state),
-                    state,
+                    icon:        iconForState(displayState),
+                    state:       displayState,
                 });
             }
         }
@@ -145,8 +149,6 @@ function buildForecast(hourlyResult, dailyResult, radarResult) {
             model.currentIntensity = "Rain moving in";
 
         if (radarResult.etaMinutes != null) {
-            // Require weather API to also show meaningful probability before
-            // overriding the hourly label — radar alone is too noisy.
             if (radarResult.etaMinutes > 0 && model.currentProbability >= 20)
                 model.nextRainLabel = `Rain in ~${radarResult.etaMinutes} min (radar)`;
             else if (radarResult.etaMinutes === 0 && model.currentProbability >= 30)
@@ -198,7 +200,7 @@ function computeNextRainLabel(future) {
     return dryH >= 2 ? `Dry for ~${Math.floor(dryH)} h` : "No rain expected";
 }
 
-// ── Colour / icon helpers (port of WeatherDot.ColorForState) ──────────────────
+// ── Colour / icon helpers ─────────────────────────────────────────────────────
 
 function isNightHour(hour, sunriseHour, sunsetHour) {
     return hour < sunriseHour || hour >= sunsetHour;
