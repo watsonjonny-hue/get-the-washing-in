@@ -1,9 +1,9 @@
 // ── Location config ───────────────────────────────────────────────────────────
-// Edit these three values to match your location.
-// Tip: find lat/lon at maps.google.com — right-click your house → "What's here?"
+// Default is null — the app will ask the user to set their location on first load.
+// They can use the GPS button or search for a place name at any time.
 
 const CONFIG = {
-    latitude:     51.8333,
-    longitude:   -0.2833,
-    locationName: "Hertfordshire, UK",
+    latitude:     null,
+    longitude:    null,
+    locationName: "",
 };
