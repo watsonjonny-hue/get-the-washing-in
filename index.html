@@ -344,11 +344,17 @@ function renderDots() {
         shape.className = "dot-shape";
 
         if (dot.showDrop) {
-            const drop = document.createElement("span");
-            drop.className    = "dot-drop";
-            drop.style.background = dot.color;
-            drop.style.opacity    = dot.dropOpacity;
-            shape.appendChild(drop);
+            const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+            svg.setAttribute("width", "8");
+            svg.setAttribute("height", "12");
+            svg.setAttribute("viewBox", "0 0 8 12");
+            svg.style.opacity = dot.dropOpacity;
+            const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+            // Proper teardrop: pointed top, round bottom — matches the desktop WPF app
+            path.setAttribute("d", "M 4,0 C 7,3 8,6 8,9 A 4,4 0 1 1 0,9 C 0,6 1,3 4,0 Z");
+            path.setAttribute("fill", dot.color);
+            svg.appendChild(path);
+            shape.appendChild(svg);
         } else {
             const circle = document.createElement("span");
             circle.className      = "dot-circle";
