@@ -135,14 +135,21 @@ let _currentName   = CONFIG.locationName;
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
 window.addEventListener("DOMContentLoaded", () => {
-    document.getElementById("loc-name").textContent = _currentName;
-    loadAll();
-    setInterval(loadAll, 12 * 60 * 1000);
+    document.getElementById("loc-name").textContent = _currentName || "Get The Washing In";
 
+    // Close search results when clicking outside
     document.addEventListener("click", e => {
         if (!e.target.closest(".loc-bar") && !e.target.closest(".loc-results"))
             hideResults();
     });
+
+    if (_currentLat == null || _currentLon == null) {
+        // No location set — show a prompt instead of firing API calls with null coords
+        showNoLocationState();
+    } else {
+        loadAll();
+        setInterval(loadAll, 12 * 60 * 1000);
+    }
 });
 
 async function refresh() {
@@ -171,6 +178,7 @@ function useGPS() {
             _currentName = "Current location";
             invalidateCaches();
 
+            // Reverse geocode to get a friendly name
             try {
                 const name = await reverseGeocode(_currentLat, _currentLon);
                 if (name) _currentName = name;
@@ -179,6 +187,7 @@ function useGPS() {
             document.getElementById("loc-name").textContent = _currentName;
             btn.classList.remove("locating");
             btn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="8" stroke-dasharray="2 3"/></svg> My location`;
+            ensureAutoRefresh();
             await loadAll();
         },
         err => {
@@ -205,6 +214,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
 async function fetchSuggestions(q) {
     try {
+        // Open-Meteo geocoding — same provider as weather, no key needed
         const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(q)}&count=5&language=en&format=json`;
         const resp = await fetch(url);
         const json = await resp.json();
@@ -249,25 +259,54 @@ async function selectLocation(lat, lon, name) {
     document.getElementById("loc-name").textContent = name;
     document.getElementById("loc-input").value = "";
     hideResults();
+    ensureAutoRefresh();
     await loadAll();
 }
 
-// ── Reverse geocode ───────────────────────────────────────────────────────────
+// ── Reverse geocode (GPS → place name) ───────────────────────────────────────
 async function reverseGeocode(lat, lon) {
+    // Open-Meteo doesn't do reverse geocoding, so we use the free Nominatim API
     const url = `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`;
     const resp = await fetch(url, { headers: { "Accept-Language": "en" } });
     const json = await resp.json();
     const a    = json.address || {};
-    const place  = a.village || a.town || a.city_district || a.city || a.county || "";
+    // Build a short readable name: village/town/city + county/state
+    const place = a.village || a.town || a.city_district || a.city || a.county || "";
     const region = a.county || a.state_district || a.state || "";
     return [place, region].filter(Boolean).join(", ") || json.display_name?.split(",")[0] || null;
 }
 
-// ── Cache invalidation ────────────────────────────────────────────────────────
+// ── Cache invalidation (force fresh fetch on location change) ─────────────────
 function invalidateCaches() {
+    // weather.js caches are module-level — reset by overwriting CONFIG coords
+    // so the cache-key check (cacheCoords) forces a fresh fetch
     CONFIG.latitude     = _currentLat;
     CONFIG.longitude    = _currentLon;
     CONFIG.locationName = _currentName;
+}
+
+function showNoLocationState() {
+    // Show a friendly nudge in the pill area instead of blank/broken data
+    document.getElementById("prob-label").textContent      = "—";
+    document.getElementById("temp-label").textContent      = "";
+    document.getElementById("wind-label").textContent      = "";
+    document.getElementById("next-rain-label").textContent = "Use GPS or search to get started";
+    document.getElementById("updated-label").textContent   = "";
+    document.getElementById("dots-row").innerHTML          = "";
+    document.getElementById("blocks-list").innerHTML       =
+        `<div class="status-msg"><span class="emoji">📍</span>Set your location above to see the forecast.</div>`;
+    document.getElementById("daily-strip").innerHTML       =
+        `<div class="status-msg"><span class="emoji">📍</span>Set your location above.</div>`;
+    document.getElementById("radar-label").textContent     = "Set a location to see radar";
+}
+
+let _autoRefreshStarted = false;
+function ensureAutoRefresh() {
+    // Start the 12-minute polling loop the first time a location is set
+    if (!_autoRefreshStarted) {
+        _autoRefreshStarted = true;
+        setInterval(loadAll, 12 * 60 * 1000);
+    }
 }
 
 function showLocError(msg) {
@@ -343,6 +382,7 @@ function renderDots() {
             svg.setAttribute("viewBox", "0 0 8 13");
             svg.style.opacity = dot.dropOpacity;
             const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+            // Proper teardrop: pointed top, round bottom — matches the desktop WPF app
             path.setAttribute("d", "M 4,0 C 7,3 8,6 8,9 A 4,4 0 1 1 0,9 C 0,6 1,3 4,0 Z");
             path.setAttribute("fill", dot.color);
             svg.appendChild(path);
