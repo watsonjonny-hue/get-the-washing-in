@@ -63,10 +63,11 @@ header {
     align-items: center;
     gap: 8px;
     margin: 0 16px 4px;
+    flex-wrap: nowrap;
 }
 
 .loc-btn {
-    display: flex;
+    display: inline-flex;
     align-items: center;
     gap: 5px;
     background: var(--surface2);
@@ -80,6 +81,7 @@ header {
     white-space: nowrap;
     transition: color 0.15s, border-color 0.15s;
     flex-shrink: 0;
+    width: auto;
 }
 .loc-btn:hover        { color: var(--accent); border-color: var(--accent); }
 .loc-btn.locating     { color: var(--accent); border-color: var(--accent); }
@@ -245,14 +247,7 @@ header {
     display: block;
 }
 
-.dot-drop {
-    /* CSS raindrop — matches desktop app shape */
-    width: 8px;
-    height: 12px;
-    border-radius: 50% 50% 50% 50% / 60% 60% 40% 40%;
-    transform: rotate(180deg);
-    display: block;
-}
+/* .dot-drop replaced by inline SVG teardrop in renderDots() */
 
 .dot-time {
     font-size: 8px;
