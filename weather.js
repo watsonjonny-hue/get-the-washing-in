@@ -25,9 +25,11 @@ async function getHourlyForecast() {
         return _hourlyCache;
     }
 
+    // best_match blends ECMWF, GFS, and local NWP models — significantly more
+    // accurate than the default for the UK, especially for convective rain.
     const url = `${BASE_URL}?latitude=${CONFIG.latitude}&longitude=${CONFIG.longitude}` +
         `&hourly=precipitation_probability,precipitation,weather_code,temperature_2m,windspeed_10m,winddirection_10m` +
-        `&wind_speed_unit=mph&timezone=${encodeURIComponent(TIMEZONE)}&forecast_days=2`;
+        `&wind_speed_unit=mph&timezone=${encodeURIComponent(TIMEZONE)}&forecast_days=2&models=best_match`;
 
     const resp = await fetch(url);
     if (!resp.ok) throw new Error(`Open-Meteo hourly: ${resp.status}`);
@@ -70,21 +72,23 @@ function parseHourly(json) {
     const h = json.hourly;
     if (!h) return [];
 
-    const times  = h.time                     || [];
-    const probs  = h.precipitation_probability || [];
-    const codes  = h.weather_code              || [];
-    const temps  = h.temperature_2m            || [];
-    const speeds = h.windspeed_10m             || [];
-    const dirs   = h.winddirection_10m         || [];
+    const times   = h.time                     || [];
+    const probs   = h.precipitation_probability || [];
+    const codes   = h.weather_code              || [];
+    const temps   = h.temperature_2m            || [];
+    const speeds  = h.windspeed_10m             || [];
+    const dirs    = h.winddirection_10m         || [];
+    const precips = h.precipitation             || [];
 
     const points = [];
     for (let i = 0; i < times.length; i++) {
-        const ts    = new Date(times[i]);
-        const prob  = probs[i]  ?? 0;
-        const code  = codes[i]  ?? 0;
-        const temp  = temps[i]  ?? null;
-        const speed = speeds[i] ?? null;
-        const dir   = dirs[i]   ?? null;
+        const ts       = new Date(times[i]);
+        const prob     = probs[i]   ?? 0;
+        const code     = codes[i]   ?? 0;
+        const temp     = temps[i]   ?? null;
+        const speed    = speeds[i]  ?? null;
+        const dir      = dirs[i]    ?? null;
+        const precipMm = precips[i] ?? null;
 
         points.push({
             timestamp:     ts,
@@ -94,6 +98,7 @@ function parseHourly(json) {
             temperature:   temp,
             windSpeed:     speed,
             windDirection: dir,
+            precipMm,
         });
     }
     return points;
@@ -162,16 +167,16 @@ function mapCode(code) {
 }
 
 function fromCode(code) {
-    if (code === 0)                              return { icon: "☀", label: "Sunny",         state: "Clear"   };
-    if (code === 1 || code === 2)                return { icon: "☁", label: "Mostly clear",  state: "Clear"   };
-    if (code === 3)                              return { icon: "☁", label: "Overcast",       state: "Cloudy"  };
-    if (code === 45 || code === 48)              return { icon: "☁", label: "Fog",            state: "Cloudy"  };
-    if (code === 51 || code === 53 || code === 55) return { icon: "🌧", label: "Drizzle",    state: "Rain"    };
-    if (code === 61 || code === 63 || code === 65) return { icon: "🌧", label: "Rain",        state: "Rain"    };
-    if ([71,73,75,77].includes(code))            return { icon: "❄", label: "Snow",           state: "Rain"    };
-    if (code === 80 || code === 81 || code === 82) return { icon: "🌧", label: "Showers",     state: "Rain"    };
-    if (code === 85 || code === 86)              return { icon: "❄", label: "Snow showers",   state: "Rain"    };
-    if (code === 95 || code === 96 || code === 99) return { icon: "⚠", label: "Thunderstorm", state: "Warning" };
+    if (code === 0)                                return { icon: "☀", label: "Sunny",         state: "Clear"   };
+    if (code === 1 || code === 2)                  return { icon: "☁", label: "Mostly clear",  state: "Clear"   };
+    if (code === 3)                                return { icon: "☁", label: "Overcast",       state: "Cloudy"  };
+    if (code === 45 || code === 48)                return { icon: "☁", label: "Fog",            state: "Cloudy"  };
+    if (code === 51 || code === 53 || code === 55) return { icon: "🌧", label: "Drizzle",       state: "Rain"    };
+    if (code === 61 || code === 63 || code === 65) return { icon: "🌧", label: "Rain",          state: "Rain"    };
+    if ([71,73,75,77].includes(code))              return { icon: "❄", label: "Snow",           state: "Rain"    };
+    if (code === 80 || code === 81 || code === 82) return { icon: "🌧", label: "Showers",       state: "Rain"    };
+    if (code === 85 || code === 86)                return { icon: "❄", label: "Snow showers",   state: "Rain"    };
+    if (code === 95 || code === 96 || code === 99) return { icon: "⚠", label: "Thunderstorm",   state: "Warning" };
     return { icon: "☁", label: "Cloudy", state: "Cloudy" };
 }
 
