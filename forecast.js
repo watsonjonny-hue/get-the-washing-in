@@ -20,11 +20,9 @@ function buildForecast(hourlyResult, dailyResult, radarResult) {
         weatherDots:          [],
         blocks:               [],
         dailyForecasts:       [],
-        // Radar
         imminentRainEtaMinutes: null,
         radarLabel:           "Loading…",
         radarFrames:          [],
-        // Computed
         get probabilityLabel()  { return `${Math.round(this.currentProbability)}%`; },
         get temperatureLabel()  { return this.currentTemperature != null ? `${Math.round(this.currentTemperature)}°C` : ""; },
         get windLabel()         { return windLabel(this.currentWindSpeed, this.currentWindDirection); },
@@ -60,16 +58,28 @@ function buildForecast(hourlyResult, dailyResult, radarResult) {
 
         if (future.length > 0) {
             const current = future[0];
-            model.currentProbability   = current.probability;
-            model.currentIntensity     = current.intensity;
-            model.weatherState         = current.condition;
             model.currentTemperature   = current.temperature;
             model.currentWindSpeed     = current.windSpeed;
             model.currentWindDirection = current.windDirection;
             model.nextRainLabel        = computeNextRainLabel(future);
 
+            // If actual precipitation mm > 0, it IS raining regardless of what
+            // the probability model says — use that as ground truth.
+            const actuallyRaining = current.precipMm != null && current.precipMm > 0;
+            if (actuallyRaining) {
+                const mm = current.precipMm;
+                model.currentIntensity   = mm > 4 ? "Very heavy" : mm > 2 ? "Heavy" : mm > 0.5 ? "Moderate" : "Light";
+                model.weatherState       = "Rain";
+                // Boost displayed probability so the pill reflects reality
+                model.currentProbability = Math.max(current.probability, 75);
+            } else {
+                model.currentProbability = current.probability;
+                model.currentIntensity   = current.intensity;
+                model.weatherState       = current.condition;
+            }
+
             // IsRainingNow / ClearsSoon
-            model.isRainingNow = future[0].probability >= 50;
+            model.isRainingNow = actuallyRaining || future[0].probability >= 50;
             if (model.isRainingNow) {
                 for (let i = 1; i < future.length; i++) {
                     if (future[i].probability < 25) {
@@ -112,9 +122,6 @@ function buildForecast(hourlyResult, dailyResult, radarResult) {
 
                 const fmt = t => `${String(t.getHours()).padStart(2,"0")}:${String(t.getMinutes()).padStart(2,"0")}`;
                 const endTs = new Date(pair[pair.length-1].timestamp.getTime() + 3600000);
-                // Use probability to drive the icon — same logic as the raindrop dots.
-                // WMO weather_code can say "overcast" at 80%+ probability, giving a cloud
-                // icon next to a nearly-full rain bar. Probability is more reliable.
                 const displayState = prob >= 40 ? "Rain" : state;
                 model.blocks.push({
                     timeRange:   `${fmt(pair[0].timestamp)}–${fmt(endTs)}`,
@@ -137,8 +144,6 @@ function buildForecast(hourlyResult, dailyResult, radarResult) {
         model.imminentRainEtaMinutes = radarResult.etaMinutes;
         model.radarFrames            = radarResult.frameDataUrls;
 
-        // Only show "Rain here now" if the weather API also agrees (≥ 30%).
-        // Radar alone is too noisy — this prevents false positives on clear days.
         if (radarResult.etaMinutes === 0 && model.currentProbability < 30) {
             model.radarLabel = "Clear on radar";
         } else {
@@ -167,7 +172,7 @@ function buildForecast(hourlyResult, dailyResult, radarResult) {
     return model;
 }
 
-// ── Next rain label (port of ComputeNextRainLabel) ────────────────────────────
+// ── Next rain label ───────────────────────────────────────────────────────────
 
 function computeNextRainLabel(future) {
     if (!future.length) return "No data";
